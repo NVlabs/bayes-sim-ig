@@ -1,0 +1,7 @@
+**/.DS_store
+.idea/
+**/*.egg-info/
+**/*.pyc
+**/__pycache__/
+bayes_sim_ig/tests/*.png
+src/
