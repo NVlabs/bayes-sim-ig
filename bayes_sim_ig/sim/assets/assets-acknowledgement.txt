@@ -1,0 +1,1 @@
+clockwise.png from is from https://github.com/openai/gym/tree/master/gym/envs/classic_control/assets

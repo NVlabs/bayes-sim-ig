@@ -1,0 +1,94 @@
+env:
+  numEnvs: 512
+  envSpacing: 7.0
+  resetDist: 3.0
+  maxEffort: 400.0
+  # upAxis: "z" # options: y or z. Note: could set this in config if needed
+  realParams:
+    weights: [ 1.0 ]
+    means: [ [
+        1.0,       # slider mass
+        0.7,       # cart mass
+        8.0,       # pole mass
+        2.0, 0.9,  # slider friction, restitution
+        6.0, 0.8,  # cart friction, restitution
+        0.5, 0.7,  # pole friction, restitution
+        2.0,       # slider_to_cart stiffness
+        0.4,       # cart_to_pole stiffness
+        60.0,      # slider_to_cart damping
+        20.0,      # cart_to_pole damping
+    ] ]
+    stds: [ [
+        0.001,
+        0.001,
+        0.001,
+        0.001, 0.001,
+        0.001, 0.001,
+        0.001, 0.001,
+        0.001,
+        0.001,
+        0.001,
+        0.001,
+    ] ]
+
+  asset:
+    assetRoot: "../../assets"
+    assetFileName: "urdf/cartpole.urdf"
+
+bayessim:
+  modelClass: 'MDNN'
+  trainTrajs: 10000
+  trainTrajLen: 10
+  trainUpdates: 1000
+  finetuneUpdates: 1000
+  trainBatchSize: 100
+  components: 10
+  hiddenLayers: [128, 128]
+  lr: 1.e-4
+  summarizerFxn: 'summary_signatory_batch'
+  collectPolicy: 'policy_ones'
+  realEvals: 100
+  realTrajs: 1
+  realIters: 20
+  ftuneRL: False
+
+task:
+  randomize: True
+  randomization_params:
+    # frequency: 1000  # do not set frequency, so that IG can randomize any time
+    actor_params:
+      cartpole:
+        color: True
+        rigid_body_properties:
+          mass:
+            range: [0.01, 20.0]
+            operation: "scaling"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0
+        rigid_shape_properties:
+          friction:
+            range: [0.01, 10.0]
+            operation: "scaling"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0
+          restitution:
+            range: [0.01, 1.0]
+            operation: "additive"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0
+        dof_properties:
+          stiffness:
+            range: [0.01, 2.0]
+            operation: "additive"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0
+          damping:
+            range: [0.01, 100.0]
+            operation: "additive"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0

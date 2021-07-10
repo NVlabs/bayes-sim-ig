@@ -1,0 +1,117 @@
+env:
+  numEnvs: 4096
+  envSpacing: 5
+  episodeLength: 1000
+  isFlagrun: False
+  enableDebugVis: False
+
+  # for BayesSim experiments
+  realParams:
+    weights: [ 1.0 ]
+    means: [ [
+      # mass
+      1.9, 1.0, 1.0, 0.3,  # mass for: torso, head, waist, pelvis
+      1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,  # mass
+      # dof stiffness
+      0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2,  # body and right side
+      10.0, 10.0, 10.0, 10.0, 10.0, 10.0,   # left side
+      10.0, 10.0, 10.0, 10.0, 10.0, 10.0,   # arms dof stiffness
+    ] ]
+    stds: [ [
+      0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001,  # mass
+      0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001,                # mass
+      0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001,  # dof stiffness
+      0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001,  # dof stiffness
+      0.001, 0.001, 0.001, 0.001, 0.001,                       # dof stiffness
+    ] ]
+
+  powerScale: 1.0
+
+  # add joint force readings to the observations
+  useDofForceSensors: True
+
+  # reward parameters
+  headingWeight: 0.5
+  upWeight: 0.1
+
+  # cost parameters
+  actionsCost: 0.01
+  energyCost: 0.05
+  dofVelocityScale: 0.1
+  angularVelocityScale: 0.25
+  contactForceScale: 0.01
+  jointsAtLimitCost: 0.25
+  deathCost: -1.0
+  terminationHeight: 0.8
+
+  asset:
+    assetRoot: "../../assets"
+    assetFileName: "mjcf/nv_humanoid.xml"
+
+  plane:
+    staticFriction: 1.0
+    dynamicFriction: 1.0
+    restitution: 0.0
+
+sim:
+  substeps: 2
+  physx:
+    num_threads: 4
+    solver_type: 1  # 0: pgs, 1: tgs
+    num_position_iterations: 4
+    num_velocity_iterations: 0
+    contact_offset: 0.02
+    rest_offset: 0.0
+    bounce_threshold_velocity: 0.2
+    max_depenetration_velocity: 10.0
+    default_buffer_size_multiplier: 10.0
+
+  flex:
+    num_inner_iterations: 10
+    warm_start: 0.25
+
+bayessim:
+  modelClass: 'MDNN'
+  trainTrajs: 10000
+  trainTrajLen: 10
+  trainUpdates: 5000
+  finetuneUpdates: 1000
+  trainBatchSize: 1000
+  components: 4 # 10
+  hiddenLayers: [128, 128]
+  lr: 5.e-4
+  summarizerFxn: 'summary_start'
+  collectPolicy: 'policy_random'
+  realEvals: 20
+  realTrajs: 1
+  realIters: 20
+  ftuneRL: False
+
+task:
+  randomize: True
+  randomization_params:
+    # specify which attributes to randomize for each actor type and property
+    # frequency: 1000  # do not set frequency, so that IG can randomize any time
+    actions:
+      range: [0., 0.1]
+      operation: "additive"
+      distribution: "gaussian"
+      schedule: "constant"
+      schedule_steps: 0
+    actor_params:
+      humanoid:
+        color: True
+        rigid_body_properties:
+          mass:
+            range: [0.1, 2.0]
+            operation: "scaling"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0
+        dof_properties:
+          stiffness:
+            range: [0.0, 10.0]
+            operation: "scaling"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0

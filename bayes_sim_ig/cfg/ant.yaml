@@ -1,0 +1,102 @@
+env:
+  numEnvs: 1024
+  envSpacing: 5
+  episodeLength: 1000
+  enableDebugVis: False
+
+  powerScale: 1.0
+  controlFrequencyInv: 1 # 60 Hz
+
+  # reward parameters
+  headingWeight: 0.5
+  upWeight: 0.1
+
+  # cost parameters
+  actionsCost: 0.005
+  energyCost: 0.05
+  dofVelocityScale: 0.2
+  contactForceScale: 0.1
+  jointsAtLimitCost: 0.1
+  deathCost: -2.0
+  terminationHeight: 0.31
+
+  # for BayesSim experiments
+  realParams:
+    weights: [ 1.0 ]
+    means: [ [
+      0.9, 1.0, 5.0, 3.4, 0.5, 3.7, 4.8, 4.2, 2.3,  # mass
+      0.1, 15.0, 0.1, 15.0, 0.1, 15.0, 0.1, 15.0,  # stiffness
+    ] ]
+    stds: [ [
+      0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001,  # mass
+      0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001,  # stiffness
+    ] ]
+
+  plane:
+    staticFriction: 1.0
+    dynamicFriction: 1.0
+    restitution: 0.0
+
+  asset:
+    assetRoot: "../../assets"
+    assetFileName: "mjcf/nv_ant.xml"
+
+sim:
+  substeps: 2
+
+  physx:
+    num_threads: 4
+    solver_type: 1  # 0: pgs, 1: tgs
+    num_position_iterations: 4
+    num_velocity_iterations: 0
+    contact_offset: 0.02
+    rest_offset: 0.0
+    bounce_threshold_velocity: 0.2
+    max_depenetration_velocity: 10.0
+
+  flex:
+    num_outer_iterations: 4
+    num_inner_iterations: 6
+    warm_start: 0.25
+
+bayessim:
+  modelClass: 'MDNN'
+  trainTrajs: 10000
+  trainTrajLen: 50
+  trainUpdates: 5000
+  finetuneUpdates: 1000
+  trainBatchSize: 1000
+  components: 4
+  hiddenLayers: [128, 128]
+  lr: 1.e-3
+  summarizerFxn: 'summary_corrdiff'
+  collectPolicy: 'policy_rl'
+  realEvals: 20
+  realTrajs: 1
+  realIters: 20
+  ftuneRL: False
+
+task:
+  randomize: True
+  # Note: rigid_shape_properties like thickness, restitution, friction do not
+  # have a visible effect with random actions, so randomizing over these would
+  # not create immediately visible effects.
+  randomization_params:
+    # frequency: 1000  # do not set frequency, so that IG can randomize any time
+    actor_params:
+      ant:
+        color: True
+        rigid_body_properties:
+          mass:
+            range: [0.01, 5.0]
+            operation: "scaling"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0
+        dof_properties:
+          stiffness:
+            range: [0.01, 20.0]
+            operation: "additive"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0

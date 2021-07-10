@@ -1,0 +1,76 @@
+env:
+  numEnvs: 4096
+  envSpacing: 2.5
+  maxEpisodeLength: 2000
+  enableDebugVis: False
+
+  # for BayesSim experiments
+  realParams:
+    weights: [ 1.0 ]
+    means: [ [
+      0.9, 1.0, 5.0, 3.4, 0.5, # mass
+      0.1, 15.0, 0.1, 15.0,    # stiffness
+    ] ]
+    stds: [ [
+      0.001, 0.001, 0.001, 0.001, 0.001,  # mass
+      0.001, 0.001, 0.001, 0.001,         # stiffness
+    ] ]
+
+  asset:
+    assetRoot: "../../assets"
+    assetFileName: "glb/ingenuity/chassis.glb"
+
+sim:
+  dt: 0.01
+  substeps: 2
+  physx:
+    num_threads: 4
+    solver_type: 1  # 0: pgs, 1: tgs
+    num_position_iterations: 6
+    num_velocity_iterations: 0
+    bounce_threshold_velocity: 0.2
+    max_depenetration_velocity: 1000.0
+    default_buffer_size_multiplier: 5.0
+
+  flex:
+    num_inner_iterations: 10
+    warm_start: 0.25
+
+bayessim:
+  modelClass: 'MDNN'
+  trainTrajs: 10000
+  trainTrajLen: 10
+  trainUpdates: 10000
+  finetuneUpdates: 1000
+  trainBatchSize: 1000
+  components: 4
+  hiddenLayers: [128, 128]
+  lr: 1.e-4
+  summarizerFxn: 'summary_start'
+  collectPolicy: 'policy_ones'
+  realEvals: 20
+  realTrajs: 1
+  realIters: 20
+  ftuneRL: False
+
+task:
+  randomize: True
+  randomization_params:
+    # frequency: 1000  # do not set frequency, so that IG can randomize any time
+    actor_params:
+      ingenuity:
+        color: True
+        rigid_body_properties:
+          mass:
+            range: [0.01, 5.0]
+            operation: "scaling"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0
+        dof_properties:
+          stiffness:
+            range: [0.01, 20.0]
+            operation: "additive"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0

@@ -1,0 +1,52 @@
+env:
+  numEnvs: 100
+  episodeLength: 200
+
+  # for BayesSim experiments
+  realParams:
+    weights: [ 1.0 ]
+    means: [ [ 1.0, 0.5 ] ]
+    stds: [ [ 0.00001, 0.00001 ] ]
+
+rkhsnet:
+  enable: True
+  nFeat: 100
+
+bayessim:
+  modelClass: MDNN  # 'MDRFF'
+  trainTrajs: 10000
+  trainTrajLen: 20
+  trainUpdates: 1000
+  finetuneUpdates: 1000
+  trainBatchSize: 5000 # 100
+  components: 10
+  hiddenLayers: [128, 128]
+  lr: 5.e-4
+  summarizerFxn: 'summary_corrdiff'
+  collectPolicy: 'policy_random'
+  realEvals: 100
+  realTrajs: 1
+  realIters: 100  # 20
+  ftuneRL: False
+
+task:
+  randomize: True
+  randomization_params:
+    # frequency: 1000  # do not set frequency, so that IG can randomize any time
+    # note: pendulum supports changing only mass and length
+    actor_params:
+      pendulum:
+        rigid_body_properties:
+          mass:
+            range: [0.01, 2.0]
+            operation: "scaling"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0
+        rigid_shape_properties:
+          length:
+            range: [0.01, 2.0]
+            operation: "scaling"
+            distribution: "uniform"
+            schedule: "constant"
+            schedule_steps: 0
