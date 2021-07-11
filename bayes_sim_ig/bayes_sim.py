@@ -13,27 +13,30 @@ import torch
 from .models.mdnn import MDNN    # used dynamically
 from .models.mdrff import MDRFF  # used dynamically
 from .utils import pdf
+from .utils.summarizers import *  # used dynamically
 
 
 class BayesSim(object):
-    NUM_TRAIN_TRAJ = 1000
+    NUM_TRAIN_TRAJ_PER_BATCH = 1000  # num trajs for each training batch
+    NUM_TRAIN_EPOCHS = 10            # num times to go over the batch
+    MINIBATCH_SIZE = 100             # minibatch size for NN training
+    NUM_GRAD_UPDATES = NUM_TRAIN_EPOCHS*NUM_TRAIN_TRAJ_PER_BATCH//MINIBATCH_SIZE
+
+    TEST_FRACTION = 0.2              # fraction of dataset to use as test
 
     def __init__(self,
-                 model_cfg,
-                 traj_summaries_dim,
-                 params_dim,
-                 params_lows,
-                 params_highs,
-                 prior,
-                 proposal=None,
-                 device='cpu'):
+                 model_cfg, obs_dim, act_dim,
+                 params_dim, params_lows, params_highs,
+                 prior, proposal=None, device='cpu'):
         """ Creates and initializes BayesSim object.
 
         Parameters
         ----------
-        model_cfg : model config from yaml file
-        traj_summaries_dim : int
-            Dimensionality of the input summaries
+        model_cfg : bayessim section of the yaml config
+        obs_dim: int
+            Dimensionality of the environment/task observations/states
+        act_dim: int
+            Dimensionality of the environment/task actions/controls
         params_dim : int
             Number of simulation parameters to estimate
         params_lows : array
@@ -50,6 +53,11 @@ class BayesSim(object):
         self.prior = prior
         self.proposal = proposal
         model_class = model_cfg['modelClass']
+        self.summarizer_fxn = eval(model_cfg['summarizerFxn'])
+        tmp_smry = self.summarizer_fxn(
+            torch.zeros(1, model_cfg['trainTrajLen'], obs_dim),
+            torch.zeros(1, model_cfg['trainTrajLen'], act_dim))
+        traj_summaries_dim = tmp_smry.shape[-1]
         full_covariance = False
         if 'fullCovariance' in model_cfg:
             full_covariance = model_cfg['fullCovariance'],
@@ -73,41 +81,48 @@ class BayesSim(object):
             kwargs.update({'n_feat': 200, 'sigma': sigma, 'kernel': kernel})
         self.model = eval(model_class)(**kwargs)
 
-    def run_training(self, params, traj_summaries, n_updates, batch_size,
-                     test_frac):
+    @staticmethod
+    def get_n_trajs_per_batch(n_train_trajs, n_train_trajs_done):
+        n_trajs_per_batch = BayesSim.NUM_TRAIN_TRAJ_PER_BATCH
+        if n_train_trajs_done + n_trajs_per_batch > n_train_trajs:
+            n_trajs_per_batch = n_train_trajs - n_train_trajs_done
+        return n_trajs_per_batch
+
+    def run_training(self, params, traj_states, traj_actions):
         """Runs the BayesSim algorithm training.
 
         Parameters
         ----------
         params : torch.Tensor
             Simulation parameters data
-        traj_summaries: torch.Tensor
-            Trajectory summaries
-        n_updates: int
-            Number of gradient updates used for neural network training
-        batch_size: int
-            Batch size for neural network training
-        test_frac: float
-            Fraction of dataset to keep as test
+        traj_states: torch.Tensor
+            Trajectory states
+        traj_actions: torch.Tensor
+            Trajectory actions
 
         Returns
         -------
         logs : list of dicts
             Dictionaries contain information logged during training
         """
+        traj_summaries = self.summarizer_fxn(traj_states, traj_actions)
         log_dict = self.model.run_training(
-            x_data=traj_summaries, y_data=params, n_updates=n_updates,
-            batch_size=batch_size, test_frac=test_frac)
+            x_data=traj_summaries, y_data=params,
+            n_updates=BayesSim.NUM_GRAD_UPDATES,
+            batch_size=BayesSim.MINIBATCH_SIZE,
+            test_frac=BayesSim.TEST_FRACTION)
         return log_dict
 
-    def predict(self, xs, threshold=0.005):
+    def predict(self, states, actions, threshold=0.005):
         """Predicts posterior given x.
 
         Parameters
         ----------
-        xs : torch.Tensor
-            Stats for which to compute the posterior
-        threshold: float
+        states: torch.Tensor
+            Trajectory states
+        actions: torch.Tensor
+            Trajectory actions
+        threshold: float (optional)
             A threshold for pruning negligible mixture components.
 
         Returns
@@ -115,6 +130,7 @@ class BayesSim(object):
         posterior : MoG
             A mixture posterior
         """
+        xs = self.summarizer_fxn(states, actions)
         mogs = self.model.predict_MoGs(xs)
         if self.proposal is not None:
             # Compute posterior given prior by analytical division step.
@@ -129,20 +145,35 @@ class BayesSim(object):
                 mogs[tmp_i] = post
         if len(mogs) == 1:
             return mogs[0]
+        # Make a small net to fit the combined mixture.
+        kwargs = {'input_dim': 1,  # unconditional MDNN
+                  'output_dim': self.model.output_dim,
+                  'output_lows': self.model.output_lows.detach().cpu().numpy(),
+                  'output_highs': self.model.output_highs.detach().cpu().numpy(),
+                  'n_gaussians': self.model.n_gaussians,
+                  'hidden_layers': (128, 128),
+                  'lr': self.model.lr,
+                  'activation': self.model.activation,
+                  'full_covariance': self.model.L_size > 0,
+                  'device': self.model.device}
+        mog_model = MDNN(**kwargs)
         # Re-sample MoGs.
         mog_smpls = None
-        n_smpls_per_mog = int(1e5/xs.shape[0])
+        tot_smpls = int(1e4)
+        n_smpls_per_mog = int(tot_smpls/xs.shape[0])
         for tmp_i in range(xs.shape[0]):
-            print(mogs[tmp_i])
             new_smpls = mogs[tmp_i].gen(n_samples=n_smpls_per_mog)
             if mog_smpls is None:
                 mog_smpls = new_smpls
             else:
                 mog_smpls = np.concatenate([mog_smpls, new_smpls], axis=0)
+        mog_smpls = torch.from_numpy(mog_smpls).float().to(self.model.device)
         # Fit a single MoG to compute the final posterior.
-        # Remove repeated entries to avoid 'singular' error
-        print('Fit MoG from', mog_smpls.shape[0], 'generated samples')
-        mog_smpls = np.unique(mog_smpls, axis=0)
-        fitted_mog = pdf.fit_mog(mog_smpls, n_components=mogs[0].n_components,
-                                 tol=1e-7, maxiter=1000)
-        return fitted_mog
+        print(f'Fitting posterior from {len(mogs):d} mogs')
+        batch_size = 100
+        n_updates = 5*tot_smpls//batch_size
+        input = torch.zeros(mog_smpls.shape[0], 1).to(self.model.device)
+        mog_model.run_training(input, mog_smpls, n_updates, batch_size)
+        fitted_mogs = mog_model.predict_MoGs(input[0:1, :])
+        assert(len(fitted_mogs) == 1)
+        return fitted_mogs[0]

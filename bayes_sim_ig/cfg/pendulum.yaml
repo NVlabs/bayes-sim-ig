@@ -13,21 +13,19 @@ rkhsnet:
   nFeat: 100
 
 bayessim:
-  modelClass: MDNN  # 'MDRFF'
-  trainTrajs: 10000
-  trainTrajLen: 20
-  trainUpdates: 1000
-  finetuneUpdates: 1000
-  trainBatchSize: 5000 # 100
-  components: 10
-  hiddenLayers: [128, 128]
-  lr: 5.e-4
-  summarizerFxn: 'summary_corrdiff'
-  collectPolicy: 'policy_random'
-  realEvals: 100
-  realTrajs: 1
-  realIters: 100  # 20
-  ftuneRL: False
+  trainTrajs: 10000  # number of training trajs to collect for BayesSim training
+  collectPolicy: 'policy_random'  # policy for getting BayesSim training data
+  summarizerFxn: 'summary_start'  # function to make trajectory summaries
+  trainTrajLen: 20   # train on short trajectories with maxlen=trainTrajLen
+  ftune: True        # whether to finetune BayesSim or re-init at each iteration
+  modelClass: MDNN   # BayesSim model ('MDNN' or 'MDRFF')
+  components: 10     # number of components in the posterior mixture
+  hiddenLayers: [128, 128]  # size of hidden layers for BayesSim NN
+  lr: 1.e-4          # optimizer learning rate for BayesSim
+  realEvals: 100     # number of surrogate 'real' test episodes (only for eval)
+  realTrajs: 1       # number of episodes to run on real hardware per iteration
+  realIters: 20      # maximum number of BayesSim iterations
+  ftuneRL: False     # fine-tune or re-start RL after each BayesSim iteration
 
 task:
   randomize: True

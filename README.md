@@ -236,17 +236,15 @@ The configs also contain `BayesSim` section that allows to customize BayesSim
 parameters. For example:
 ```
 bayessim:
-  modelClass: MDNN   # 'MDNN' or 'MDRFF' 
   trainTrajs: 10000  # number of training trajs to collect for BayesSim training
-  trainTrajLen: 20   # train on short trajectories with this maximum length
-  trainUpdates: 1000     # number of gradient updates for 1st BayesSim iteration
-  finetuneUpdates: 1000  # num. grad. updates for further BayesSim iterations
-  trainBatchSize: 5000   # batch size for BayesSim training
-  components: 10         # number of components in the posterior mixture
-  hiddenLayers: [128, 128]           # size of hidden layers for BayesSim NN
-  lr: 5.e-4                          # optimizer learning rate for BayesSim
-  summarizerFxn: 'summary_corrdiff'  # function to make trajectory summaries
   collectPolicy: 'policy_random'     # policy for getting BayesSim training data
+  summarizerFxn: 'summary_start'     # function to make trajectory summaries
+  trainTrajLen: 20   # train on short trajectories with maxlen=trainTrajLen
+  ftune: True        # whether to finetune BayesSim or re-init at each iteration
+  modelClass: MDNN   # BayesSim model ('MDNN' or 'MDRFF')
+  components: 10     # number of components in the posterior mixture
+  hiddenLayers: [128, 128]           # size of hidden layers for BayesSim NN
+  lr: 1.e-4                          # optimizer learning rate for BayesSim
   realEvals: 100     # number of surrogate 'real' test episodes (only for eval)
   realTrajs: 1       # number of episodes to run on real hardware per iteration
   realIters: 100     # maximum number of BayesSim iterations
@@ -341,7 +339,7 @@ as a way to summarize trajectory data:
 ```
 bayessim:
   ...
-  summarizerFxn: 'summary_signatory_batch'  # function to process summaries
+  summarizerFxn: 'summary_signatory'  # function to process summaries
 ```
 
 This functionality is available via intergation with the Signatory library [2].

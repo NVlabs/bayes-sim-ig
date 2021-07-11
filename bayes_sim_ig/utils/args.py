@@ -17,6 +17,8 @@ import numpy as np
 
 from rlgpu.utils.config import get_args, load_cfg
 
+IG_TASKS = ['Ant', 'Anymal', 'BallBalance', 'Cartpole', 'FrankaCabinet',
+            'Humanoid', 'Ingenuity', 'Pendulum', 'Quadcoper', 'ShadowHand']
 
 def init_args():
     """Creates args as appropriate for BayesSim runs"""
@@ -32,6 +34,9 @@ def init_args():
         args = get_args()
         args.task = saved_task
         sys.argv[idx] = saved_task
+    if args.task not in IG_TASKS:
+        print('Need one of the supported tasks:', IG_TASKS, 'got', args.task)
+        exit(1)
     # Try to load default configs if needed.
     bsim_root_dir = dirup(dirup(os.path.realpath(__file__)))
     pfx = re.findall('[A-Z][^A-Z]*', args.task)
@@ -58,17 +63,19 @@ def init_args():
         f'Need task.randomize==True in {args.cfg_env:s}'
     if args.seed is None:
         args.seed = 0  # make sure we have a numeric default seed
-    args.logdir = make_logdir_str(args.logdir, args.task, args.seed, cfg_env)
+    args.logdir = make_logdir_str(args.logdir, args.task, args.seed,
+                                  args.max_iterations, cfg_env)
     return args, cfg_env, cfg_train
 
 
-def make_logdir_str(pfx, task_name, seed, cfg):
+def make_logdir_str(pfx, task_name, seed, rl_max_iter, cfg):
     """Constructs an informative name for the directory with logs."""
     rest_str = '_'.join(
         [task_name, cfg['bayessim']['modelClass'],
-         'ftune'+str(cfg['bayessim']['finetuneUpdates']),
+         'ftune' if cfg['bayessim']['ftune'] else 'noftune',
          cfg['bayessim']['summarizerFxn'],
          cfg['bayessim']['collectPolicy'],
+         'rl'+str(rl_max_iter),
          'nreal'+str(cfg['bayessim']['realTrajs']),
          'seed'+str(seed),
           # datetime.strftime(datetime.today(), '%y%m%d_%H%M%S')

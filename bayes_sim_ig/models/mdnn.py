@@ -24,7 +24,7 @@ class MDNN(nn.Module):
     EPS_NOISE = 1.e-5  # small noise e.g. for numerical stability
 
     def __init__(self, input_dim, output_dim, output_lows, output_highs,
-                 n_gaussians, hidden_layers, lr, activation, full_covariance,
+                 n_gaussians, full_covariance, hidden_layers, activation, lr,
                  device='cpu', **kwargs):
         """Constructs and initializes a Mixture Density Network.
 
@@ -34,14 +34,16 @@ class MDNN(nn.Module):
             Dimensionality of the input
         output_dim : int
             Dimensionality of the output
-        n_gaussians : int
-            Number of Gaussian components for the mixture
-        hidden_layers : list or tuple of int
-            Size of each fully-connected hidden layer for the main NN
         output_lows: array
             Flat array of lows for output ranges
         output_highs: array
             Flat array of highs for output ranges
+        n_gaussians : int
+            Number of Gaussian components for the mixture
+        full_covariance : bool
+            Whether Gaussian components should be full covariance
+        hidden_layers : list or tuple of int
+            Size of each fully-connected hidden layer for the main NN
         activation: Module
             torch.nn activation class, e.g. Tanh, LeakyReLU
         lr: float
@@ -57,16 +59,17 @@ class MDNN(nn.Module):
             self.output_lows = torch.from_numpy(output_lows).float().to(device)
             self.output_highs = torch.from_numpy(output_highs).float().to(device)
         self.n_gaussians = n_gaussians
+        self.activation = activation
         self.lr = lr
         self.device = device
-        self.dropout_p = 0.1
+        # self.dropout_p = 0.1
         # Construct the main part of NN as nn.Sequential
         # https://pytorch.org/docs/stable/generated/torch.nn.Sequential.html
         net = OrderedDict()
         last_layer_size = input_dim
         for l, layer_size in enumerate(hidden_layers):
             net['fcon%d' % l] = nn.Linear(last_layer_size, layer_size)
-            net['fdrop%d' % l] = nn.Dropout(self.dropout_p)
+            # net['fdrop%d' % l] = nn.Dropout(self.dropout_p)
             net['nl%d' % l] = activation()
             last_layer_size = layer_size
         self.net = nn.Sequential(net) if len(hidden_layers) > 0 else None
@@ -195,6 +198,7 @@ class MDNN(nn.Module):
         logs : list of dicts
             Dictionaries contain information logged during training
         """
+        assert(x_data.shape[0] == y_data.shape[0])
         self.train()
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         if self.output_lows is not None:
@@ -228,7 +232,7 @@ class MDNN(nn.Module):
             loss = self.mdn_loss_fn(pi, mu, L_d, L, y_batch)
             loss.backward()
             optimizer.step()
-            if epoch%max(n_updates // 10, 1) == 0 or epoch + 1 == n_updates:
+            if epoch%max(n_updates//5, 1) == 0 or epoch + 1 == n_updates:
                 test_loss = self.mdn_loss_fn(
                     *self(x_test_data), y_test_data)
                 test_loss = test_loss.item()

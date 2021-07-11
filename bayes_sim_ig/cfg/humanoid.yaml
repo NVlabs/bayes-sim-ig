@@ -71,20 +71,18 @@ sim:
     warm_start: 0.25
 
 bayessim:
-  modelClass: 'MDNN'
   trainTrajs: 10000
-  trainTrajLen: 10
-  trainUpdates: 5000
-  finetuneUpdates: 1000
-  trainBatchSize: 1000
-  components: 4 # 10
-  hiddenLayers: [128, 128]
-  lr: 5.e-4
-  summarizerFxn: 'summary_start'
   collectPolicy: 'policy_random'
-  realEvals: 20
+  summarizerFxn: 'summary_start'
+  trainTrajLen: 10
+  ftune: True
+  modelClass: MDNN
+  components: 10
+  hiddenLayers: [128, 128]
+  lr: 1.e-4
+  realEvals: 100
   realTrajs: 1
-  realIters: 20
+  realIters: 100
   ftuneRL: False
 
 task:

@@ -8,10 +8,11 @@
 """Collect a set of simulated trajectories for training BayesSim."""
 
 import torch
-from .summarizers import *  # used dynamically
+
+from .summarizers import pad_states_actions
 
 
-def collect_trajectories(num_trajs, ppo, summarizer_fxn, collect_policy_fxn,
+def collect_trajectories(num_trajs, ppo, collect_policy_fxn,
                          max_traj_len=None, device='cpu',
                          verbose=False, visualize=False):
     """Collects data for num_trajs episodes from ppo.vec_env."""
@@ -24,25 +25,25 @@ def collect_trajectories(num_trajs, ppo, summarizer_fxn, collect_policy_fxn,
     else:
         ids = range(ppo.vec_env.task.num_envs)
     all_sim_params = []
-    all_sim_traj_summaries = []
+    all_sim_traj_states = []
+    all_sim_traj_actions = []
     all_sim_traj_rewards = []
     sim_episode_obs = {}
     sim_episode_act = {}
     sim_episode_rwd = {}
-    num_summarizer_failures = 0
     saved_max_episode_length = None
     if max_traj_len is not None:
         saved_max_episode_length = ppo.vec_env.task.max_episode_length
         ppo.vec_env.task.max_episode_length = max_traj_len+1
     obs = ppo.vec_env.reset()  # this overloaded method does reset all envs
     imgs = []
-    # if visualize and hasattr(ppo.vec_env.task, 'get_img'):
-    #     imgs = [ppo.vec_env.task.get_img(ids[0])]
+    if visualize and hasattr(ppo.vec_env.task, 'get_img'):
+        imgs = [ppo.vec_env.task.get_img()]
     for env_id in range(ppo.vec_env.num_envs):
         sim_episode_obs[env_id] = [obs[env_id]]
         sim_episode_act[env_id] = []
         sim_episode_rwd[env_id] = []
-    while True:  # collect and summarize simulated episodes/trajectories
+    while True:  # collect simulated episodes/trajectories
         if hasattr(ppo.vec_env, 'get_state'):
             act, *_ = ppo.actor_critic.act(obs, ppo.vec_env.get_state())
         else:
@@ -58,28 +59,21 @@ def collect_trajectories(num_trajs, ppo, summarizer_fxn, collect_policy_fxn,
             if done[env_id] == 1:  # will be reset on next step, so save traj
                 assert(len(sim_episode_obs[env_id]) <=
                        ppo.vec_env.task.max_episode_length)
-                if summarizer_fxn is None:
-                    sim_x = None
-                elif '_batch' in summarizer_fxn.__name__:  # summarize later
-                    sim_x = summary_start(sim_episode_obs[env_id],
-                                          sim_episode_act[env_id],
-                                          ppo.vec_env.task.max_episode_length)
-                else:
-                    sim_x = summarizer_fxn(sim_episode_obs[env_id],
-                                           sim_episode_act[env_id])
-                if (summarizer_fxn is None) or (sim_x is not None):
-                    all_sim_params.append(torch.tensor(
-                        ppo.vec_env.task.extern_actor_params[env_id]).float())
-                    all_sim_traj_summaries.append(sim_x)
-                    all_sim_traj_rewards.append(sum(sim_episode_rwd[env_id]))
-                    num_trajs_done = len(all_sim_traj_summaries)
-                    if (verbose and num_trajs > 10 and
-                        num_trajs_done%(num_trajs//10) == 0):
-                        print('collected', len(all_sim_traj_summaries), 'trajs')
-                    if len(all_sim_traj_summaries) >= num_trajs:
-                        break  # collected enough trajectories (episodes)
-                else:
-                    num_summarizer_failures += 1
+                all_sim_params.append(torch.tensor(
+                    ppo.vec_env.task.extern_actor_params[env_id]).float())
+                traj_states, traj_actions = pad_states_actions(
+                    torch.stack(sim_episode_obs[env_id]).unsqueeze(0),
+                    torch.stack(sim_episode_act[env_id]).unsqueeze(0),
+                    tgt_actions_len=ppo.vec_env.task.max_episode_length)
+                all_sim_traj_states.append(traj_states)
+                all_sim_traj_actions.append(traj_actions)
+                all_sim_traj_rewards.append(sum(sim_episode_rwd[env_id]))
+                num_trajs_done = len(all_sim_traj_rewards)
+                if (verbose and num_trajs > 10 and
+                    num_trajs_done%(num_trajs//10) == 0):
+                    print('collected', num_trajs_done, 'trajs')
+                if num_trajs_done >= num_trajs:
+                    break  # collected enough trajectories (episodes)
                 # Clear episode accumulators.
                 sim_episode_obs[env_id] = []
                 sim_episode_act[env_id] = []
@@ -87,23 +81,16 @@ def collect_trajectories(num_trajs, ppo, summarizer_fxn, collect_policy_fxn,
         if (visualize and hasattr(ppo.vec_env.task, 'get_img') and
             len(imgs) < ppo.vec_env.task.max_episode_length):
             imgs.append(ppo.vec_env.task.get_img())
-        if num_summarizer_failures > num_trajs*10:
-            assert(False), 'ERROR: too many summarizer failures'
-        if len(all_sim_traj_summaries) >= num_trajs:
+        if len(all_sim_traj_rewards) >= num_trajs:
             break  # collected enough trajectories (episodes)
     sim_params_smpls = torch.stack(all_sim_params).to(device)
+    sim_traj_states = torch.cat(all_sim_traj_states, dim=0).to(device)
+    sim_traj_actions = torch.cat(all_sim_traj_actions, dim=0).to(device)
     sim_traj_rewards = torch.stack(all_sim_traj_rewards).to(device)
-    sim_traj_summaries = None
-    if summarizer_fxn is not None:
-        sim_traj_summaries = torch.stack(all_sim_traj_summaries).to(device)
-    if summarizer_fxn is not None and '_batch' in summarizer_fxn.__name__:
-        bsz = sim_traj_summaries.shape[0]
-        sim_traj_summaries = sim_traj_summaries.view(
-            bsz, ppo.vec_env.task.max_episode_length, -1)
-        sim_traj_summaries = summarizer_fxn(sim_traj_summaries)
     if saved_max_episode_length is not None:
         ppo.vec_env.task.max_episode_length = saved_max_episode_length
-    return sim_params_smpls, sim_traj_summaries, sim_traj_rewards, imgs
+    return sim_params_smpls, sim_traj_states, sim_traj_actions, \
+           sim_traj_rewards, imgs
 
 
 def policy_ones(act):

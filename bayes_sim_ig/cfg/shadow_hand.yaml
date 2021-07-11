@@ -71,22 +71,19 @@ sim:
     relaxation: 0.75
 
 bayessim:
-  modelClass: 'MDNN'
   trainTrajs: 50000
-  trainTrajLen: 50
-  trainUpdates: 5000
-  finetuneUpdates: 1000
-  trainBatchSize: 1000
+  collectPolicy: 'policy_random'
+  summarizerFxn: 'summary_start'
+  trainTrajLen: 10
+  ftune: True
+  modelClass: MDNN
   components: 4
-  hiddenLayers: [128, 128, 128]
+  hiddenLayers: [128, 128]
   lr: 1.e-4
-  summarizerFxn: 'summary_corrdiff'
-  collectPolicy: 'policy_ones'
-  realEvals: 20
+  realEvals: 100
   realTrajs: 1
-  realIters: 20
+  realIters: 100
   ftuneRL: False
-
 
 task:
   randomize: True

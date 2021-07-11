@@ -71,22 +71,20 @@ sim:
     relaxation: 0.75
 
 bayessim:
-  modelClass: 'MDNN'
   trainTrajs: 20000
-  trainTrajLen: 50
-  trainUpdates: 1000
-  finetuneUpdates: 1000
-  trainBatchSize: 100
-  components: 10
-  fullCovariance: False  # set to False for high dim, num comps > 10
-  hiddenLayers: [128, 128, 128]
-  lr: 1.e-4
+  collectPolicy: 'policy_random'
   summarizerFxn: 'summary_corrdiff'
-  collectPolicy: 'policy_rl'
-  realEvals: 20
+  trainTrajLen: 50
+  ftune: True
+  modelClass: MDNN
+  components: 10
+  fullCovariance: False  # set to False for high dim, num comps >= 10
+  hiddenLayers: [128, 128]
+  lr: 1.e-4
+  realEvals: 100
   realTrajs: 1
-  realIters: 20
-  ftuneRL: True
+  realIters: 100
+  ftuneRL: False
 
 
 task:

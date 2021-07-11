@@ -50,7 +50,6 @@ from .sim.ig_env_wrappers import make_ig_env
 from .utils import pdf, plot
 from .utils.args import init_args, log_args, check_distr, load_real_params
 from .utils.collect_trajectories import *  # used dynamically
-from .utils.summarizers import *  # used dynamically
 
 
 def main():
@@ -64,8 +63,8 @@ def main():
     #
     # Init real and sim parameter distributions.
     #
-    eal_weights, real_means, real_stds = load_real_params(cfg_env, params_gen)
-    real_params_distr = pdf.MoG(a=eal_weights, ms=real_means, Ss=real_stds)
+    real_weights, real_means, real_stds = load_real_params(cfg_env, params_gen)
+    real_params_distr = pdf.MoG(a=real_weights, ms=real_means, Ss=real_stds)
     check_distr(real_params_distr, params_gen.lows, params_gen.highs,
                 'realParams')
     print('Init real_params_distr', real_params_distr)
@@ -85,14 +84,14 @@ def main():
     #
     # Main 'real' loop.
     #
-    summarizer_fxn = eval(cfg_env['bayessim']['summarizerFxn'])
-    n_train_trajs = cfg_env['bayessim']['trainTrajs']
     if 'policyCheckpt' in cfg_env['bayessim']:
         ppo.load(cfg_env['bayessim']['policyCheckpt'])
     collect_policy_fxn = eval(cfg_env['bayessim']['collectPolicy'])
     bsim = None
     bsim_model_class = cfg_env['bayessim']['modelClass']
-    bsim_ftune = cfg_env['bayessim']['finetuneUpdates'] > 0
+    n_train_trajs = cfg_env['bayessim']['trainTrajs']
+    all_real_states = None
+    all_real_actions = None
     for real_iter_id in range(cfg_env['bayessim']['realIters']):
         #
         # Plot sim_params_distr that we are about to use for PPO training
@@ -127,9 +126,8 @@ def main():
         print('Simulating evals...')
         params_gen.set_distr(real_params_distr)
         num_eval_episodes = cfg_env['bayessim']['realEvals']
-        _, _, real_rwds, real_imgs = collect_trajectories(
-            num_eval_episodes, ppo, None,
-            None, max_traj_len=None, device='cpu',
+        _, tmp_states, tmp_acts, real_rwds, real_imgs = collect_trajectories(
+            num_eval_episodes, ppo, None, max_traj_len=None, device='cpu',
             verbose=False, visualize=True)
         for fxn in ['mean', 'min', 'max']:
             writer.add_scalar('SurrogateReal/real_rewards_'+fxn,
@@ -143,52 +141,60 @@ def main():
         #
         # Collect trajectories for BayesSim training and train BayesSim.
         #
-        print('Collect trajectories for BayesSim', bsim_model_class)
-        curr_n_train_trajs = n_train_trajs
-        n_updates = cfg_env['bayessim']['trainUpdates']
-        if bsim_ftune and real_iter_id > 0:
-            ftune_n_updates = cfg_env['bayessim']['finetuneUpdates']
-            curr_n_train_trajs *= (float(ftune_n_updates)/n_updates)
-            n_updates = ftune_n_updates
+        print(f'Start BayesSim {bsim_model_class:s} iter {real_iter_id:d}')
         unif = pdf.Uniform(params_gen.lows, params_gen.highs)
         params_gen.set_distr(unif)
-        sim_params_smpls, sim_traj_summaries, _, _ = collect_trajectories(
-            n_train_trajs, ppo, summarizer_fxn, collect_policy_fxn,
-            max_traj_len=cfg_env['bayessim']['trainTrajLen'],
-            device=args.rl_device, verbose=True, visualize=False)
-        print('Train BayesSim', bsim_model_class)
-        if bsim is None or not bsim_ftune:
-            bsim = BayesSim(
+        if bsim is None or not cfg_env['bayessim']['ftune']:
+            bsim = BayesSim(  # make new BayesSim obj if needed
                 model_cfg=cfg_env['bayessim'],
-                traj_summaries_dim=sim_traj_summaries.shape[1],
-                params_dim=sim_params_smpls.shape[1],
-                params_lows=params_gen.lows,
-                params_highs=params_gen.highs,
+                obs_dim=cfg_env['env']['numObservations'],
+                act_dim=cfg_env['env']['numActions'],
+                params_dim=params_gen.lows.shape[0],
+                params_lows=params_gen.lows, params_highs=params_gen.highs,
                 prior=None, proposal=None, device=args.rl_device)
-        log_bsim = bsim.run_training(
-            sim_params_smpls, sim_traj_summaries, n_updates=n_updates,
-            batch_size=cfg_env['bayessim']['trainBatchSize'], test_frac=0.2)
-        del sim_params_smpls
-        del sim_traj_summaries
-        gc.collect()
-        torch.cuda.empty_cache()
-        #
-        # Update posterior using surrogate real trajs and BayesSim inference.
-        #
-        print('Simulating surrogate real runs...')
-        params_gen.set_distr(real_params_distr)
-        real_params, real_xs, real_rwds, _ = collect_trajectories(
-            cfg_env['bayessim']['realTrajs'], ppo,
-            summarizer_fxn, collect_policy_fxn,
-            max_traj_len=cfg_env['bayessim']['trainTrajLen'],  # match train
-            device=args.rl_device, verbose=False, visualize=False)
-        sim_params_distr = bsim.predict(real_xs.to(args.rl_device))
+        n_trajs_done = 0
+        print('Will train BayesSim on', n_train_trajs, 'trajs')
+        while n_trajs_done < n_train_trajs:
+            n_trajs_per_batch = BayesSim.get_n_trajs_per_batch(
+                n_train_trajs, n_trajs_done)
+            print('Collect', n_trajs_per_batch, 'trajs')
+            sim_prms, sim_traj_states, sim_traj_acts, *_ = collect_trajectories(
+                n_trajs_per_batch, ppo, collect_policy_fxn,
+                max_traj_len=cfg_env['bayessim']['trainTrajLen'],
+                device=args.rl_device, verbose=False, visualize=False)
+            print('Train BayesSim...')
+            log_bsim = bsim.run_training(sim_prms, sim_traj_states, sim_traj_acts)
+            n_trajs_done += n_trajs_per_batch
+            print(f'n_trajs_done {n_trajs_done:d} (of {n_train_trajs:d})')
+            del sim_prms
+            del sim_traj_states
+            del sim_traj_acts
+            gc.collect()
+            torch.cuda.empty_cache()
         writer.add_scalar(
             'BayesSim/train_loss', log_bsim['train_loss'][-1], real_iter_id)
         writer.add_scalar(
             'BayesSim/test_loss', log_bsim['test_loss'][-1], real_iter_id)
         writer.flush()
         sys.stdout.flush()
+        #
+        # Update posterior using surrogate real trajs and BayesSim inference.
+        #
+        print('Simulating surrogate real runs...')
+        params_gen.set_distr(real_params_distr)
+        real_params, real_states, real_actions, *_ = collect_trajectories(
+            cfg_env['bayessim']['realTrajs'], ppo, collect_policy_fxn,
+            max_traj_len=cfg_env['bayessim']['trainTrajLen'],  # match train
+            device=args.rl_device, verbose=False, visualize=False)
+        if real_iter_id == 0:
+            all_real_states = real_states.to(args.rl_device)
+            all_real_actions = real_actions.to(args.rl_device)
+        else:
+            all_real_states = torch.cat(
+                [all_real_states, real_states.to(args.rl_device)], dim=0)
+            all_real_actions = torch.cat(
+                [all_real_actions, real_actions.to(args.rl_device)], dim=0)
+        sim_params_distr = bsim.predict(all_real_states, all_real_actions)
 
 
 if __name__ == '__main__':

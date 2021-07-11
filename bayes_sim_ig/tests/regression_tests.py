@@ -19,7 +19,6 @@ import torch
 
 from ..bayes_sim import BayesSim
 from ..utils import plot
-from ..utils.summarizers import *
 
 
 DATA_FILE_NAMES = [
@@ -29,7 +28,7 @@ DATA_FILE_NAMES = [
      'true': 'pendulum_true_data_ones_policy_nornd.npz'},]
 
 
-def load_pendulum_data(fnm, summarizer_fxn):
+def load_pendulum_data(fnm):
     loaded = np.load(fnm)
     params = torch.from_numpy(loaded['params']).float()
     states_acts = torch.from_numpy(loaded['data']).float()
@@ -37,23 +36,11 @@ def load_pendulum_data(fnm, summarizer_fxn):
         params = params.reshape(1, -1)
         states_acts = states_acts.reshape(1, -1)
     print('Loaded params', params.shape, 'states_acts', states_acts.shape)
-    if summarizer_fxn is None:
-        return params, states_acts  # raw traj
     state_sz = 3  # cos(theta), sin(theta), thetadot
     states_acts = torch.from_numpy(loaded['data']).float().reshape(
         params.shape[0], -1, state_sz+1)
     print('Reshaped states_acts', states_acts.shape)
-    if '_batch' in summarizer_fxn.__name__:
-        traj_summaries = summarizer_fxn(states_acts)
-    else:
-        traj_summaries = []
-        for tmp_i in range(states_acts.shape[0]):
-            traj_summaries.append(summarizer_fxn(
-                states_acts[tmp_i, :, :state_sz],
-                states_acts[tmp_i, :, state_sz:]))
-        traj_summaries = torch.stack(traj_summaries)
-    print('traj_summaries', traj_summaries.shape)
-    return params, traj_summaries
+    return params, states_acts[:, :, :state_sz], states_acts[:, :, state_sz:]
 
 
 def run_tests(model_class, device, data_file_names, summarizer_fxn):
@@ -62,43 +49,49 @@ def run_tests(model_class, device, data_file_names, summarizer_fxn):
     sim_params_lows = np.array([0.01]*n_sim_params)
     sim_params_highs = np.array([2.0]*n_sim_params)
     data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'data')
-    sim_params, sim_traj_summaries = load_pendulum_data(
-        os.path.join(data_dir, data_file_names['sim']), summarizer_fxn)
+    sim_params, sim_traj_states, sim_traj_actions = load_pendulum_data(
+        os.path.join(data_dir, data_file_names['sim']))
     if 'nornd' in data_file_names['sim']:
         n_traj = 1250  # n_traj*0.8=1000 training trajs as in original code
         sim_params = sim_params[:n_traj]
-        sim_traj_summaries = sim_traj_summaries[:n_traj]
+        sim_traj_states = sim_traj_states[:n_traj]
+        sim_traj_actions = sim_traj_actions[:n_traj]
         hidden_layers = (24, 24)
-        n_updates = 2000
     else:
         hidden_layers = (128, 128)
-        n_updates = 4000
     print('Train BayesSim', model_class, 'with summarizer', summarizer_fxn,
-          'on sim_traj_summaries', sim_traj_summaries.shape, 'from data in',
+          'on sim_traj_states', sim_traj_states.shape, 'from data in',
           data_file_names['sim'])
-    model_cfg = {'modelClass': model_class, 'components': 10,
-                 'hiddenLayers': hidden_layers, 'lr': 1e-3}
-    bsim = BayesSim(model_cfg=model_cfg,
-                    traj_summaries_dim=sim_traj_summaries.shape[1],
-                    params_dim=sim_params.shape[1],
+    model_cfg = {'modelClass': model_class,
+                 'summarizerFxn': summarizer_fxn, 'trainTrajLen': 10,
+                 'components': 10, 'hiddenLayers': hidden_layers,
+                 'lr': 5e-4}
+
+    bsim = BayesSim(model_cfg=model_cfg, obs_dim=3, act_dim=1,
+                    params_dim=sim_params_lows.shape[0],
                     params_lows=sim_params_lows, params_highs=sim_params_highs,
                     prior=None, proposal=None, device=device)
     print(bsim.model)
-    bsim.run_training(sim_params, sim_traj_summaries,
-                      n_updates=n_updates, batch_size=50, test_frac=0.2)
-    real_params, real_x = load_pendulum_data(
-        os.path.join(data_dir, data_file_names['true']), summarizer_fxn)
+    num_iters = 10  # BayesSim iters
+    for i in range(num_iters):
+        bsim.run_training(sim_params, sim_traj_states, sim_traj_actions)
+    real_params, real_states, real_actions = load_pendulum_data(
+        os.path.join(data_dir, data_file_names['true']))
+    real_params = torch.cat([real_params, real_params], dim=0)
+    real_states = torch.cat([real_states, real_states], dim=0)
+    real_actions = torch.cat([real_actions, real_actions], dim=0)
     print('BayesSim predict for data with true params', real_params)
-    print('real_params\n', real_params, '\nreal_x\n', real_x)
-    bsim_params_distr = bsim.predict(real_x)
+    print('real_params\n', real_params, '\nreal_states\n', real_states,
+          '\nreal_actions\n', real_actions)
+    bsim_params_distr = bsim.predict(real_states, real_actions)
     print('Posterior bsim_params_distr', bsim_params_distr)
     print('real_params nll', -1.0*bsim_params_distr.eval(
         real_params.detach().cpu().numpy(), log=True, debug=True))
     policy_name = 'nornd' if 'nornd' in data_file_names['sim'] else 'rnd'
     output_file = os.path.join(
         dirup(os.path.realpath(__file__)),
-        'BayesSim_regression_test_'+model_class+'_'+
-        summarizer_fxn.__name__+'_policy_'+policy_name+'.png')
+        'BayesSim_regression_test_'+model_class+'_'+summarizer_fxn
+        +'_policy_'+policy_name+'.png')
     print('Making posterior plot in', output_file)
     plot.plot_posterior(
         writer=None, tb_msg=None, tb_step=None,
@@ -122,11 +115,11 @@ if __name__ == "__main__":
         torch.cuda.set_device(device)
         torch.backends.cudnn.deterministic = True   # more reproducible
         torch.cuda.manual_seed_all(seed)
-    summarizers = [summary_start, summary_waypts,
-                   summary_corr, summary_corrdiff]
+    summarizers = ['summary_start', 'summary_waypts',
+                   'summary_corr', 'summary_corrdiff']
     try:
         import signatory
-        summarizers.append(summary_signatory_batch)
+        summarizers.append('summary_signatory')
     finally:
         pass  # signatory is advanced experimental functionality, not required
     for summarizer_fxn in summarizers:
