@@ -60,7 +60,7 @@ class BayesSim(object):
         traj_summaries_dim = tmp_smry.shape[-1]
         full_covariance = False
         if 'fullCovariance' in model_cfg:
-            full_covariance = model_cfg['fullCovariance'],
+            full_covariance = model_cfg['fullCovariance']
         kwargs = {'input_dim': traj_summaries_dim, 'output_dim': params_dim,
                   'output_lows': params_lows, 'output_highs': params_highs,
                   'n_gaussians': model_cfg['components'],
