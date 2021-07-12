@@ -368,7 +368,7 @@ If you found this repository helpful, please cite:
 @article{bayes-sim-ig,
 author = {Rika Antonova, Fabio Ramos, Rafael Possas, Dieter Fox},
 title = {BayesSimIG: Scalable Parameter Inference for Adaptive Domain Randomization with Isaac Gym},
-booktitle = {arXiv preprint TODO.TODO},
+journal = {arXiv preprint arXiv:2107.04527},
 year = {2021},
 }
 ```
